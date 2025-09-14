@@ -1,0 +1,884 @@
+import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'package:intl/intl.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:convert';
+import 'package:google_fonts/google_fonts.dart';
+import '../booking/booking.dart';
+import 'appointment_detail.dart';
+import '../models/appointment.dart';
+
+// -------------------- API SERVICE --------------------
+Future<List<Appointment>> fetchAppointments() async {
+  final prefs = await SharedPreferences.getInstance();
+  final ownerId = prefs.getInt('userId') ?? 0;
+
+  final response = await http.get(
+    Uri.parse("http://10.0.2.2:8080/api/appointments/owner/$ownerId"),
+  );
+
+  if (response.statusCode != 200) {
+    throw Exception("Failed to load appointments");
+  }
+
+  final data = jsonDecode(response.body);
+  if (data is! List) throw Exception("API appointments không trả về List");
+
+  List<Appointment> appointments = data.map<Appointment>((e) => Appointment.fromJson(e)).toList();
+
+  final discoveryIds = appointments.map((a) => a.discoveryId).toSet().toList();
+  final petIds = appointments.map((a) => a.petId).toSet().toList();
+
+  if (discoveryIds.isNotEmpty) {
+    final discoveryRes = await http.get(
+      Uri.parse("http://10.0.2.2:8080/api/discoveries/ids?ids=${discoveryIds.join("&ids=")}"),
+    );
+    if (discoveryRes.statusCode == 200) {
+      final discoveryList = jsonDecode(discoveryRes.body);
+      final discoveryMap = {
+        for (var d in discoveryList) d['id']: {
+          'name': d['name'],
+          'location': d['location'],
+        }
+      };
+
+      for (var appt in appointments) {
+        appt.discoveryName = discoveryMap[appt.discoveryId]?['name'] ?? "";
+        appt.location = discoveryMap[appt.discoveryId]?['location'] ?? "";
+      }
+    }
+  }
+
+  if (petIds.isNotEmpty) {
+    final petRes = await http.get(
+      Uri.parse("http://10.0.2.2:8080/api/pets/ids?ids=${petIds.join("&ids=")}"),
+    );
+    if (petRes.statusCode == 200) {
+      final petList = jsonDecode(petRes.body);
+      final petMap = {
+        for (var p in petList)
+          p['id']: {
+            'name': p['name'],
+            'species': p['species'],
+            'breed': p['breed'],
+            'age': p['age'],
+            'avatar': p['avatar'],
+          }
+      };
+
+      for (var appt in appointments) {
+        final petData = petMap[appt.petId];
+        if (petData != null) {
+          appt.petName = petData['name'] ?? "";
+          appt.petSpecies = petData['species'] ?? "";
+          appt.petBreed = petData['breed'] ?? "";
+          appt.petAge = petData['age'] ?? 0;
+          appt.petAvatar = petData['avatar'] ?? "";
+        }
+      }
+    }
+  }
+
+  final now = DateTime.now().copyWith(hour: 0, minute: 0, second: 0, millisecond: 0, microsecond: 0);
+  appointments.sort((a, b) {
+    final aTime = a.apptTime ?? DateTime(9999, 12, 31);
+    final bTime = b.apptTime ?? DateTime(9999, 12, 31);
+
+    if ((aTime.isAfter(now) || aTime.isAtSameMomentAs(now)) &&
+        (bTime.isAfter(now) || bTime.isAtSameMomentAs(now))) {
+      return aTime.compareTo(bTime);
+    } else if (aTime.isBefore(now) && bTime.isBefore(now)) {
+      return aTime.compareTo(bTime);
+    } else if (aTime.isAfter(now) || aTime.isAtSameMomentAs(now)) {
+      return -1;
+    } else {
+      return 1;
+    }
+  });
+
+  return appointments;
+}
+
+// -------------------- UI --------------------
+class AppointmentListPage extends StatefulWidget {
+  const AppointmentListPage({super.key});
+
+  @override
+  State<AppointmentListPage> createState() => _AppointmentListPageState();
+}
+
+class _AppointmentListPageState extends State<AppointmentListPage> {
+  late Future<List<Appointment>> futureAppointments;
+  final DateFormat dateFormatter = DateFormat('dd/MM/yyyy');
+  final TextEditingController _searchController = TextEditingController();
+  DateTime? _startDate;
+  DateTime? _endDate;
+  String _searchQuery = '';
+  String? _selectedStatus;
+  List<Appointment> _filteredAppointments = [];
+  final Map<int, bool> _expandedPetGroups = {};
+
+  @override
+  void initState() {
+    super.initState();
+    futureAppointments = fetchAppointments();
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _selectDate(BuildContext context, bool isStart) async {
+    final DateTime? picked = await showDatePicker(
+      context: context,
+      initialDate: isStart ? (_startDate ?? DateTime.now()) : (_endDate ?? DateTime.now()),
+      firstDate: DateTime(2000),
+      lastDate: DateTime(2101),
+      builder: (context, child) {
+        return Theme(
+          data: ThemeData.light().copyWith(
+            colorScheme: const ColorScheme.light(
+              primary: Color(0xFF3B82F6),
+              onPrimary: Colors.white,
+            ),
+            dialogBackgroundColor: Colors.white,
+          ),
+          child: child!,
+        );
+      },
+    );
+    if (picked != null) {
+      setState(() {
+        if (isStart) {
+          _startDate = picked;
+        } else {
+          _endDate = picked;
+        }
+      });
+    }
+  }
+
+  Future<void> _cancelAppointment(Appointment appointment) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final ownerId = prefs.getInt('userId') ?? 0;
+      if (ownerId == 0) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error: User ID not found', style: GoogleFonts.poppins()),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
+      }
+
+      final url = Uri.parse("http://10.0.2.2:8080/api/appointments/${appointment.id}");
+      final body = {
+        'id': appointment.id,
+        'petId': appointment.petId,
+        'ownerId': ownerId,
+        'discoveryId': appointment.discoveryId,
+        'apptTime': appointment.apptTime?.toIso8601String(),
+        'status': 'CANCELLED',
+      };
+      print('Cancelling appointment with ID: ${appointment.id}');
+      print('Request Body: ${jsonEncode(body)}');
+      final response = await http.put(
+        url,
+        headers: {
+          'Content-Type': 'application/json; charset=UTF-8',
+        },
+        body: jsonEncode(body),
+      );
+
+      print('Cancel API Response Status: ${response.statusCode}');
+      print('Cancel API Response Body: ${response.body}');
+
+      if (response.statusCode == 200) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Appointment cancelled successfully!', style: GoogleFonts.poppins()),
+            backgroundColor: Colors.green,
+            duration: Duration(seconds: 2),
+          ),
+        );
+        setState(() {
+          futureAppointments = fetchAppointments(); // Làm mới danh sách appointments
+        });
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to cancel appointment: ${response.statusCode} - ${response.body}', style: GoogleFonts.poppins()),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } catch (e) {
+      print('Error cancelling appointment: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error cancelling appointment: $e', style: GoogleFonts.poppins()),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  void _applySearch(List<Appointment> appointments) {
+    setState(() {
+      _searchQuery = _searchController.text;
+      _filteredAppointments = _filterAppointments(appointments);
+    });
+  }
+
+  List<Appointment> _filterAppointments(List<Appointment> appointments) {
+    return appointments.where((appt) {
+      final matchesSearch = _searchQuery.isEmpty ||
+          (appt.discoveryName?.toLowerCase().contains(_searchQuery.toLowerCase()) ?? false) ||
+          (appt.petName?.toLowerCase().contains(_searchQuery.toLowerCase()) ?? false);
+
+      final matchesDate = (_startDate == null && _endDate == null) ||
+          (appt.apptTime != null &&
+              (_startDate == null || appt.apptTime!.isAfter(_startDate!.subtract(const Duration(days: 1)))) &&
+              (_endDate == null || appt.apptTime!.isBefore(_endDate!.add(const Duration(days: 1)))));
+
+      final matchesStatus = _selectedStatus == null || appt.status == _selectedStatus;
+
+      return matchesSearch && matchesDate && matchesStatus;
+    }).toList();
+  }
+
+  Map<int, List<Appointment>> _groupAppointmentsByPet(List<Appointment> appointments) {
+    final grouped = <int, List<Appointment>>{};
+    for (var appt in appointments) {
+      grouped.putIfAbsent(appt.petId, () => []).add(appt);
+    }
+    return grouped;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [Color(0xFFF8FAFC), Color(0xFFEFF6FF)],
+          ),
+        ),
+        child: SafeArea(
+          child: Column(
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                child: Text(
+                  'Appointments',
+                  style: GoogleFonts.poppins(
+                    fontSize: 26,
+                    fontWeight: FontWeight.w700,
+                    color: const Color(0xFF1E293B),
+                  ),
+                ),
+              ),
+              Expanded(
+                child: FutureBuilder<List<Appointment>>(
+                  future: futureAppointments,
+                  builder: (context, snapshot) {
+                    if (snapshot.connectionState == ConnectionState.waiting) {
+                      return const Center(child: CircularProgressIndicator(color: Color(0xFF3B82F6)));
+                    } else if (snapshot.hasError) {
+                      return Center(
+                        child: Text(
+                          "Error: ${snapshot.error}",
+                          style: GoogleFonts.poppins(
+                            fontSize: 16,
+                            color: Colors.redAccent,
+                          ),
+                        ),
+                      );
+                    } else if (!snapshot.hasData || snapshot.data!.isEmpty) {
+                      return Center(
+                        child: Text(
+                          "No appointments",
+                          style: GoogleFonts.poppins(
+                            fontSize: 16,
+                            color: Colors.grey[600],
+                          ),
+                        ),
+                      );
+                    }
+
+                    final appointments = snapshot.data!;
+                    _filteredAppointments = _searchQuery.isEmpty && _startDate == null && _endDate == null && _selectedStatus == null
+                        ? appointments
+                        : _filterAppointments(appointments);
+
+                    final groupedAppointments = _groupAppointmentsByPet(_filteredAppointments);
+
+                    return SingleChildScrollView(
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+                        child: Column(
+                          children: [
+                            _buildSearchAndFilters(appointments),
+                            const SizedBox(height: 12),
+                            groupedAppointments.isEmpty
+                                ? Center(
+                              child: Text(
+                                "No matching appointments",
+                                style: GoogleFonts.poppins(
+                                  fontSize: 16,
+                                  color: Colors.grey[600],
+                                ),
+                              ),
+                            )
+                                : ListView.builder(
+                              shrinkWrap: true,
+                              physics: const NeverScrollableScrollPhysics(),
+                              itemCount: groupedAppointments.length,
+                              itemBuilder: (context, index) {
+                                final petId = groupedAppointments.keys.elementAt(index);
+                                final petAppointments = groupedAppointments[petId]!;
+                                final petName = petAppointments.first.petName ?? 'Pet';
+                                final petAvatar = petAppointments.first.petAvatar;
+                                final isExpanded = _expandedPetGroups[petId] ?? false;
+
+                                return AnimatedContainer(
+                                  duration: const Duration(milliseconds: 300),
+                                  curve: Curves.easeInOut,
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Material(
+                                        color: Colors.transparent,
+                                        child: InkWell(
+                                          borderRadius: BorderRadius.circular(16),
+                                          onTap: () {
+                                            setState(() {
+                                              _expandedPetGroups[petId] = !isExpanded;
+                                            });
+                                          },
+                                          child: Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                                            margin: const EdgeInsets.only(bottom: 8),
+                                            decoration: BoxDecoration(
+                                              color: Colors.white,
+                                              borderRadius: BorderRadius.circular(16),
+                                              boxShadow: [
+                                                BoxShadow(
+                                                  color: Colors.grey.withOpacity(0.15),
+                                                  blurRadius: 10,
+                                                  offset: const Offset(0, 3),
+                                                ),
+                                              ],
+                                              border: Border.all(
+                                                color: Colors.blue.withOpacity(0.1),
+                                              ),
+                                            ),
+                                            child: Row(
+                                              children: [
+                                                CircleAvatar(
+                                                  radius: 22,
+                                                  backgroundColor: Colors.grey[200],
+                                                  backgroundImage: petAvatar != null && petAvatar.isNotEmpty
+                                                      ? NetworkImage(petAvatar)
+                                                      : null,
+                                                  child: petAvatar == null || petAvatar.isEmpty
+                                                      ? const Icon(Icons.pets, color: Color(0xFF3B82F6), size: 24)
+                                                      : null,
+                                                ),
+                                                const SizedBox(width: 12),
+                                                Expanded(
+                                                  child: Text(
+                                                    petName,
+                                                    style: GoogleFonts.poppins(
+                                                      fontSize: 18,
+                                                      fontWeight: FontWeight.w600,
+                                                      color: const Color(0xFF1E293B),
+                                                    ),
+                                                  ),
+                                                ),
+                                                AnimatedRotation(
+                                                  turns: isExpanded ? 0.5 : 0.0,
+                                                  duration: const Duration(milliseconds: 300),
+                                                  child: Icon(
+                                                    Icons.keyboard_arrow_down,
+                                                    color: const Color(0xFF3B82F6),
+                                                    size: 28,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                      AnimatedCrossFade(
+                                        firstChild: const SizedBox.shrink(),
+                                        secondChild: ListView.builder(
+                                          shrinkWrap: true,
+                                          physics: const NeverScrollableScrollPhysics(),
+                                          itemCount: petAppointments.length,
+                                          itemBuilder: (context, apptIndex) {
+                                            final appt = petAppointments[apptIndex];
+                                            return _buildAppointmentCard(
+                                              appt.discoveryName ?? 'Service',
+                                              appt.apptTime != null ? dateFormatter.format(appt.apptTime!) : '',
+                                              appt.location ?? 'Ha Noi',
+                                              const Color(0xFF3B82F6),
+                                              status: appt.status ?? 'CANCELLED',
+                                              appointment: appt,
+                                            );
+                                          },
+                                        ),
+                                        crossFadeState: isExpanded ? CrossFadeState.showSecond : CrossFadeState.showFirst,
+                                        duration: const Duration(milliseconds: 300),
+                                      ),
+                                      const SizedBox(height: 8),
+                                    ],
+                                  ),
+                                );
+                              },
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSearchBar(List<Appointment> appointments) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      margin: const EdgeInsets.symmetric(horizontal: 8),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [Colors.white, Colors.blue.withOpacity(0.05)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.grey.withOpacity(0.1),
+            blurRadius: 10,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: TextField(
+              controller: _searchController,
+              decoration: InputDecoration(
+                hintText: 'Search by service or pet name...',
+                hintStyle: GoogleFonts.poppins(
+                  color: Colors.grey[500],
+                  fontSize: 15,
+                ),
+                border: InputBorder.none,
+                prefixIcon: const Icon(Icons.search, color: Color(0xFF3B82F6), size: 20),
+              ),
+              style: GoogleFonts.poppins(
+                fontSize: 15,
+                color: const Color(0xFF1E293B),
+              ),
+              onChanged: (_) => _applySearch(appointments),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSearchAndFilters(List<Appointment> appointments) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        // Search bar
+        _buildSearchBar(appointments),
+        const SizedBox(height: 12),
+
+        // Date pickers row
+        Row(
+          children: [
+            Expanded(
+              child: GestureDetector(
+                onTap: () => _selectDate(context, true),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                  margin: const EdgeInsets.only(right: 6),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(12),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.grey.withOpacity(0.1),
+                        blurRadius: 8,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
+                    border: Border.all(color: Colors.blue.withOpacity(0.1)),
+                  ),
+                  child: Text(
+                    _startDate != null ? dateFormatter.format(_startDate!) : 'Start Date',
+                    style: GoogleFonts.poppins(
+                      fontSize: 14,
+                      color: _startDate != null ? const Color(0xFF1E293B) : Colors.grey[500],
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ),
+            ),
+            Expanded(
+              child: GestureDetector(
+                onTap: () => _selectDate(context, false),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                  margin: const EdgeInsets.only(left: 6),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(12),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.grey.withOpacity(0.1),
+                        blurRadius: 8,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
+                    border: Border.all(color: Colors.blue.withOpacity(0.1)),
+                  ),
+                  child: Text(
+                    _endDate != null ? dateFormatter.format(_endDate!) : 'End Date',
+                    style: GoogleFonts.poppins(
+                      fontSize: 14,
+                      color: _endDate != null ? const Color(0xFF1E293B) : Colors.grey[500],
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+
+        // Status dropdown
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+          margin: const EdgeInsets.symmetric(horizontal: 0),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.grey.withOpacity(0.1),
+                blurRadius: 8,
+                offset: const Offset(0, 2),
+              ),
+            ],
+            border: Border.all(color: Colors.blue.withOpacity(0.1)),
+          ),
+          child: DropdownButtonHideUnderline(
+            child: DropdownButton<String>(
+              value: _selectedStatus,
+              hint: Text(
+                'Select Status',
+                style: GoogleFonts.poppins(
+                  fontSize: 14,
+                  color: Colors.grey[500],
+                ),
+              ),
+              isExpanded: true,
+              items: [
+                DropdownMenuItem<String>(
+                  value: null,
+                  child: _buildStatusItem('All Statuses', Icons.all_inclusive, Colors.grey),
+                ),
+                DropdownMenuItem<String>(
+                  value: 'PENDING',
+                  child: _buildStatusItem('PENDING', Icons.pending, Colors.orange),
+                ),
+                DropdownMenuItem<String>(
+                  value: 'CONFIRMED',
+                  child: _buildStatusItem('CONFIRMED', Icons.check_circle, Colors.blue),
+                ),
+                DropdownMenuItem<String>(
+                  value: 'CANCELLED',
+                  child: _buildStatusItem('CANCELLED', Icons.cancel, Colors.red),
+                ),
+                DropdownMenuItem<String>(
+                  value: 'DONE',
+                  child: _buildStatusItem('DONE', Icons.done, Colors.green),
+                ),
+              ],
+              onChanged: (value) {
+                setState(() {
+                  _selectedStatus = value;
+                  _filteredAppointments = _filterAppointments(_filteredAppointments);
+                });
+              },
+              style: GoogleFonts.poppins(
+                fontSize: 13,
+                color: const Color(0xFF1E293B),
+              ),
+              dropdownColor: Colors.white,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+// Helper to build status row with icon + text
+  Widget _buildStatusItem(String label, IconData icon, Color color) {
+    return Row(
+      children: [
+        Icon(icon, size: 16, color: color),
+        const SizedBox(width: 6),
+        Flexible(
+          child: Text(
+            label,
+            style: GoogleFonts.poppins(fontSize: 13),
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+      ],
+    );
+  }
+
+
+
+  Widget _buildAppointmentCard(
+      String service,
+      String datetime,
+      String provider,
+      Color color, {
+        required String status,
+        required Appointment appointment,
+
+      }) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => AppointmentDetailPage(appointment: appointment),
+            ),
+          );
+        },
+        child: Container(
+          margin: const EdgeInsets.only(bottom: 8),
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.grey.withOpacity(0.15),
+                offset: const Offset(0, 3),
+                blurRadius: 10,
+                spreadRadius: 0.5,
+              ),
+            ],
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 4,
+                height: 60,
+                decoration: BoxDecoration(
+                  color: color,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Expanded(
+                          child: Row(
+                            children: [
+                              const Icon(Icons.medical_services, size: 18, color: Color(0xFF3B82F6)),
+                              const SizedBox(width: 8),
+                              Flexible(
+                                child: Text(
+                                  service,
+                                  style: GoogleFonts.poppins(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w600,
+                                    color: const Color(0xFF1E293B),
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: status == 'Confirmed' ? Colors.green.withOpacity(0.2) : Colors.orange.withOpacity(0.2),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Text(
+                            status,
+                            style: GoogleFonts.poppins(
+                              fontSize: 10,
+                              color: status == 'Confirmed' ? Colors.green.shade700 : Colors.orange.shade700,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Icon(Icons.access_time, size: 14, color: Colors.grey[500]),
+                        const SizedBox(width: 4),
+                        Text(
+                          datetime,
+                          style: GoogleFonts.poppins(
+                            fontSize: 12,
+                            color: Colors.grey[600],
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        Icon(Icons.location_on, size: 14, color: Colors.grey[500]),
+                        const SizedBox(width: 4),
+                        Expanded(
+                          child: Text(
+                            provider,
+                            style: GoogleFonts.poppins(
+                              fontSize: 12,
+                              color: Colors.grey[600],
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              Column(
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.more_vert, size: 20),
+                    onPressed: () {
+                      _showAppointmentOptions(context, appointment);
+                    },
+                    color: Colors.grey[600],
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showAppointmentOptions(BuildContext context, Appointment appointment) {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      backgroundColor: Colors.white,
+      builder: (context) => Container(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+
+            if (appointment.status == 'PENDING') // Chỉ hiển thị nếu status là PENDING
+              ListTile(
+                leading: const Icon(Icons.cancel, color: Colors.red),
+                title: Text('Cancel Appointment', style: GoogleFonts.poppins(fontSize: 15)),
+                onTap: () {
+                  Navigator.pop(context);
+                  // Hiển thị dialog xác nhận
+                  showDialog(
+                    context: context,
+                    builder: (context) => AlertDialog(
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                      title: Text(
+                        'Confirm Cancellation',
+                        style: GoogleFonts.poppins(fontSize: 18, fontWeight: FontWeight.w600),
+                      ),
+                      content: Text(
+                        'Are you sure you want to cancel this appointment?',
+                        style: GoogleFonts.poppins(fontSize: 14, color: Colors.grey[600]),
+                      ),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(context), // Đóng dialog
+                          child: Text(
+                            'No',
+                            style: GoogleFonts.poppins(color: Color(0xFF3B82F6)),
+                          ),
+                        ),
+                        TextButton(
+                          onPressed: () async {
+                            Navigator.pop(context); // Đóng dialog
+                            await _cancelAppointment(appointment); // Thực hiện hủy
+                          },
+                          child: Text(
+                            'Yes',
+                            style: GoogleFonts.poppins(color: Colors.red),
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+            ListTile(
+              leading: const Icon(Icons.info, color: Colors.grey),
+              title: Text('View Details', style: GoogleFonts.poppins(fontSize: 15)),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => AppointmentDetailPage(appointment: appointment),
+                  ),
+                ).then((result) {
+                  if (result == true) {
+                    setState(() {
+                      futureAppointments = fetchAppointments(); // Làm mới danh sách appointments
+                    });
+                  }
+                });
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
