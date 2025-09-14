@@ -116,6 +116,7 @@ class _NavigationPageState extends State<NavigationPage> with SingleTickerProvid
     return Scaffold(
       body: _pages[_selectedIndex],
       floatingActionButton: FloatingActionButton(
+        heroTag: "nav_fab",
         onPressed: () => _showBookingDialog(context), // sửa ở đây luôn
         backgroundColor: const Color(0xFF3B82F6),
         child: const Icon(Icons.event_available, color: Colors.white),

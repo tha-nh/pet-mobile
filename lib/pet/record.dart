@@ -3,40 +3,11 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
+import 'package:pawfectcare_mobile/pet/record_details.dart';
+import '../models/appointment.dart';
+import '../models/health_record.dart';
 import '../models/pet.dart';
 import 'add_pet.dart'; // Import AddPetPage
-
-class HealthRecord {
-  final int id;
-  final int petId;
-  final int vetId;
-  final int apptId;
-  final String? diagnosis;
-  final String? treatment;
-  final String? notes;
-
-  HealthRecord({
-    required this.id,
-    required this.petId,
-    required this.vetId,
-    required this.apptId,
-    this.diagnosis,
-    this.treatment,
-    this.notes,
-  });
-
-  factory HealthRecord.fromJson(Map<String, dynamic> json) {
-    return HealthRecord(
-      id: json['id'] ?? 0,
-      petId: json['petId'] ?? 0,
-      vetId: json['vetId'] ?? 0,
-      apptId: json['apptId'] ?? 0,
-      diagnosis: json['diagnosis'],
-      treatment: json['treatment'],
-      notes: json['notes'],
-    );
-  }
-}
 
 class PetRecordPage extends StatefulWidget {
   final Pet pet;
@@ -116,8 +87,46 @@ class _PetRecordPageState extends State<PetRecordPage> with TickerProviderStateM
 
       if (response.statusCode == 200) {
         final List data = json.decode(response.body);
+        List<HealthRecord> tempRecords = data.map<HealthRecord>((json) => HealthRecord.fromJson(json)).toList();
+
+        // Lấy thông tin Appointment và lưu trữ thời gian
+        List<Map<String, dynamic>> recordsWithTime = [];
+        for (var record in tempRecords) {
+          final appointment = await fetchAppointment(record.apptId);
+          recordsWithTime.add({
+            'record': record,
+            'apptTime': appointment?.apptTime ?? DateTime(1970), // Mặc định thời gian xa nếu không có Appointment
+          });
+        }
+
+        // Ngày hiện tại (14/09/2025)
+        final now = DateTime(2025, 9, 14);
+
+        // Sắp xếp theo khoảng cách đến ngày hiện tại
+        recordsWithTime.sort((a, b) {
+          final timeA = a['apptTime'] as DateTime;
+          final timeB = b['apptTime'] as DateTime;
+
+          // Xác định xem bản ghi là quá khứ hay tương lai
+          final isAPast = timeA.isBefore(now) || timeA.isAtSameMomentAs(now);
+          final isBPast = timeB.isBefore(now) || timeB.isAtSameMomentAs(now);
+
+          // Ưu tiên quá khứ trước, tương lai sau
+          if (isAPast && !isBPast) return -1;
+          if (!isAPast && isBPast) return 1;
+
+          // Nếu cả hai đều trong quá khứ hoặc tương lai, sắp xếp theo khoảng cách tuyệt đối
+          final diffA = (timeA.difference(now).inDays).abs();
+          final diffB = (timeB.difference(now).inDays).abs();
+
+          // Trong quá khứ: gần nhất trước (tăng dần)
+          // Trong tương lai: gần nhất trước (tăng dần)
+          return diffA.compareTo(diffB);
+        });
+
+        // Cập nhật danh sách healthRecords
         setState(() {
-          healthRecords = data.map<HealthRecord>((json) => HealthRecord.fromJson(json)).toList();
+          healthRecords = recordsWithTime.map<HealthRecord>((item) => item['record'] as HealthRecord).toList();
           isLoading = false;
         });
       } else {
@@ -130,6 +139,19 @@ class _PetRecordPageState extends State<PetRecordPage> with TickerProviderStateM
       });
     }
   }
+
+  Future<Appointment?> fetchAppointment(int apptId) async {
+    final url = Uri.parse("http://10.0.2.2:8080/api/appointments/$apptId");
+    final response = await http.get(url);
+
+    if (response.statusCode == 200) {
+      return Appointment.fromJson(jsonDecode(response.body));
+    } else {
+      print("Failed to load appointment");
+      return null;
+    }
+  }
+
 
   @override
   Widget build(BuildContext context) {
@@ -305,6 +327,24 @@ class _PetRecordPageState extends State<PetRecordPage> with TickerProviderStateM
               Expanded(
                 child: _buildInfoItem('Age', '${pet.age} years', Icons.cake),
               ),
+              Expanded(
+                child: _buildInfoItem(
+                  'Gender',
+                  pet.gender ?? "Unknown",
+                  pet.gender == "MALE"
+                      ? Icons.male
+                      : pet.gender == "FEMALE"
+                      ? Icons.female
+                      : Icons.help_outline,
+                  color: pet.gender == "MALE"
+                      ? Colors.blue
+                      : pet.gender == "FEMALE"
+                      ? Colors.pink
+                      : Colors.grey,
+                ),
+              ),
+
+
             ],
           ),
           if (pet.color != null) ...[
@@ -336,7 +376,7 @@ class _PetRecordPageState extends State<PetRecordPage> with TickerProviderStateM
     );
   }
 
-  Widget _buildInfoItem(String label, String value, IconData icon) {
+  Widget _buildInfoItem(String label, String value, IconData icon, {Color? color}) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -401,7 +441,7 @@ class _PetRecordPageState extends State<PetRecordPage> with TickerProviderStateM
             ],
           ),
           Container(
-            height: 400,
+            height: 740,
             child: TabBarView(
               controller: _tabController,
               children: [
@@ -451,92 +491,214 @@ class _PetRecordPageState extends State<PetRecordPage> with TickerProviderStateM
   }
 
   Widget _buildHealthRecordCard(HealthRecord record) {
+    final now = DateTime(2025, 9, 14, 11, 37); // Ngày hiện tại: 14/09/2025 11:37
+
     return Container(
-      margin: EdgeInsets.only(bottom: 12),
-      padding: EdgeInsets.all(16),
+      margin: EdgeInsets.only(bottom: 16),
+      padding: EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: Color(0xFFEFF3F8),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.grey.withOpacity(0.1)),
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.grey.withOpacity(0.2),
+            offset: Offset(2, 2),
+            blurRadius: 8,
+            spreadRadius: 1,
+          ),
+        ],
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            Color(0xFFF8FAFF),
+            Color(0xFFEFF3F8),
+          ],
+        ),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Expanded(
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: () {
+          // Có thể thêm hành động khi nhấn, ví dụ: mở chi tiết bản ghi
+        },
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Ngày giờ và trạng thái
+            FutureBuilder<Appointment?>(
+              future: fetchAppointment(record.apptId),
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return Row(
+                    children: [
+                      CircularProgressIndicator(
+                        strokeWidth: 2,
+                        valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF3B82F6)),
+                      ),
+                      SizedBox(width: 12),
+                      Text(
+                        "Loading appointment...",
+                        style: GoogleFonts.poppins(
+                          fontSize: 14,
+                          color: Colors.grey[600],
+                        ),
+                      ),
+                    ],
+                  );
+                } else if (snapshot.hasError || !snapshot.hasData) {
+                  return Row(
+                    children: [
+                      Icon(Icons.error_outline, size: 20, color: Colors.red),
+                      SizedBox(width: 8),
+                      Text(
+                        "No appointment data",
+                        style: GoogleFonts.poppins(
+                          fontSize: 14,
+                          color: Colors.red,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  );
+                } else {
+                  final appt = snapshot.data!;
+                  String formatApptDate(DateTime? date) {
+                    if (date == null) return "No appointment date";
+                    return "${date.day.toString().padLeft(2, '0')}/"
+                        "${date.month.toString().padLeft(2, '0')}/"
+                        "${date.year}";
+                  }
+
+
+                  final isPast = appt.apptTime?.isBefore(now) ?? true;
+                  return Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.event,
+                            size: 20,
+                            color: isPast ? Colors.blueGrey : Color(0xFF3B82F6),
+                          ),
+                          SizedBox(width: 8),
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                "Examination Date",
+                                style: GoogleFonts.poppins(
+                                  fontSize: 12,
+                                  color: Colors.grey[500],
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                              Text(
+                                formatApptDate(appt.apptTime),
+                                style: GoogleFonts.poppins(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w600,
+                                  color: Color(0xFF2A2D3E),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ],
+                  );
+                }
+              },
+            ),
+            SizedBox(height: 16),
+            // Thông tin chẩn đoán
+            if (record.diagnosis != null) ...[
+              Row(
+                children: [
+                  Icon(Icons.medical_services, size: 18, color: Colors.grey[600]),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Diagnosis: ${record.diagnosis}',
+                      style: GoogleFonts.poppins(
+                        fontSize: 14,
+                        color: Colors.grey[800],
+                        fontWeight: FontWeight.w500,
+                        height: 1.4,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              SizedBox(height: 12),
+            ],
+            // Thông tin điều trị
+            if (record.treatment != null) ...[
+              Row(
+                children: [
+                  Icon(Icons.healing, size: 18, color: Colors.grey[600]),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Treatment: ${record.treatment}',
+                      style: GoogleFonts.poppins(
+                        fontSize: 14,
+                        color: Colors.grey[800],
+                        fontWeight: FontWeight.w500,
+                        height: 1.4,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              SizedBox(height: 12),
+            ],
+            // Ghi chú
+            if (record.notes != null) ...[
+              Row(
+                children: [
+                  Icon(Icons.note, size: 18, color: Colors.grey[600]),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Notes: ${record.notes}',
+                      style: GoogleFonts.poppins(
+                        fontSize: 14,
+                        color: Colors.grey[800],
+                        fontWeight: FontWeight.w500,
+                        height: 1.4,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              SizedBox(height: 12),
+            ],
+            // Nút chi tiết
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton(
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => RecordDetailsPage(recordId: record.id),
+                    ),
+                  );
+                },
                 child: Text(
-                  'Health Record #${record.id}',
+                  "View Details",
                   style: GoogleFonts.poppins(
-                    fontSize: 16,
+                    fontSize: 14,
+                    color: Color(0xFF3B82F6),
                     fontWeight: FontWeight.w600,
-                    color: Color(0xFF2A2D3E),
                   ),
                 ),
               ),
-            ],
-          ),
-          if (record.diagnosis != null) ...[
-            SizedBox(height: 8),
-            Text(
-              'Diagnosis: ${record.diagnosis}',
-              style: GoogleFonts.poppins(
-                fontSize: 14,
-                color: Colors.grey[600],
-                height: 1.4,
-              ),
             ),
           ],
-          if (record.treatment != null) ...[
-            SizedBox(height: 8),
-            Text(
-              'Treatment: ${record.treatment}',
-              style: GoogleFonts.poppins(
-                fontSize: 14,
-                color: Colors.grey[600],
-                height: 1.4,
-              ),
-            ),
-          ],
-          if (record.notes != null) ...[
-            SizedBox(height: 8),
-            Text(
-              'Notes: ${record.notes}',
-              style: GoogleFonts.poppins(
-                fontSize: 14,
-                color: Colors.grey[600],
-                height: 1.4,
-              ),
-            ),
-          ],
-          SizedBox(height: 12),
-          Row(
-            children: [
-              Icon(Icons.event, size: 14, color: Colors.grey[500]),
-              SizedBox(width: 4),
-              Text(
-                'Appt ID: ${record.apptId}',
-                style: GoogleFonts.poppins(
-                  fontSize: 12,
-                  color: Colors.grey[500],
-                ),
-              ),
-              SizedBox(width: 16),
-              Icon(Icons.person, size: 14, color: Colors.grey[500]),
-              SizedBox(width: 4),
-              Text(
-                'Vet ID: ${record.vetId}',
-                style: GoogleFonts.poppins(
-                  fontSize: 12,
-                  color: Colors.grey[500],
-                ),
-              ),
-            ],
-          ),
-        ],
+        ),
       ),
     );
   }
-
 }

@@ -42,6 +42,10 @@ dependencies:
   url_launcher: any
   flutter_animate: any
   flutter_staggered_animations: any
+  share_plus: any # Để chia sẻ nội dung
+  pdf: any       # Để tạo file PDF
+  path_provider: any # Để lưu file vào thiết bị
+  open_file: any    # Để mở file PDF sau khi tạo
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.8
@@ -73,7 +77,7 @@ flutter:
     - assets/images/fish.webp
     - assets/images/hedgehog.jpg
     - assets/images/horse.jpeg
-
+    - assets/images/tip1.jpg
   # The following line ensures that the Material Icons font is
   # included with your application, so that you can use the icons in
   # the material Icons class.

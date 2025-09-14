@@ -11,6 +11,7 @@ class Pet {
   final String? medicalHistory;
   final double? weight;
   final String? color;
+  final String? gender; // 👈 thêm field gender
 
   Pet({
     this.id,
@@ -23,6 +24,7 @@ class Pet {
     this.medicalHistory,
     this.weight,
     this.color,
+    this.gender,
   });
 
   factory Pet.fromJson(Map<String, dynamic> json) {
@@ -37,6 +39,7 @@ class Pet {
       medicalHistory: json['medicalHistory'],
       weight: json['weight']?.toDouble(),
       color: json['color'],
+      gender: json['gender'], // 👈 parse thêm gender
     );
   }
 }

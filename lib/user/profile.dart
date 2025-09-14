@@ -22,6 +22,10 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
   Map<String, dynamic>? userData;
   bool isLoading = true;
   String errorMessage = '';
+  int petCount = 0;
+  int daysCount = 0;
+  int recordCount = 0;
+
   late AnimationController _fadeController;
   late Animation<double> _fadeAnimation;
   late AnimationController _slideController;
@@ -32,6 +36,9 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     super.initState();
     _initAnimations();
     fetchUserData();
+    _loadPetCount();
+    _loadDaysCount();
+    _loadRecordCount();
   }
 
   void _initAnimations() {
@@ -254,6 +261,70 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
       }
     } catch (e) {
       Navigator.pop(context); // Đóng loading nếu còn
+    }
+  }
+
+  Future<void> _loadPetCount() async {
+    final prefs = await SharedPreferences.getInstance();
+    final userId = prefs.getInt('userId') ?? 0;
+
+    try {
+      final response = await http.get(
+        Uri.parse("http://10.0.2.2:8080/api/pets/count/user/$userId"),
+      );
+
+      if (response.statusCode == 200) {
+        setState(() {
+          petCount = int.parse(response.body); // API trả về Long nên parse
+        });
+      } else {
+        print("Failed to load pet count: ${response.statusCode}");
+      }
+    } catch (e) {
+      print("Error loading pet count: $e");
+    }
+  }
+
+  Future<void> _loadDaysCount() async {
+    final prefs = await SharedPreferences.getInstance();
+    final userId = prefs.getInt('userId') ?? 0;
+
+    try {
+      final response = await http.get(
+        Uri.parse("http://10.0.2.2:8080/api/pets/days-since-created/$userId"),
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body); // parse JSON
+        setState(() {
+          daysCount = data['daysSinceCreated'] ?? 0;
+        });
+      } else {
+        print("Failed to load days count: ${response.statusCode}");
+      }
+    } catch (e) {
+      print("Error loading days count: $e");
+    }
+  }
+
+  Future<void> _loadRecordCount() async {
+    final prefs = await SharedPreferences.getInstance();
+    final userId = prefs.getInt('userId') ?? 0;
+
+    try {
+      final response = await http.get(
+        Uri.parse("http://10.0.2.2:8080/api/health-records/count/$userId"),
+      );
+
+      if (response.statusCode == 200) {
+        setState(() {
+          recordCount = int.parse(response.body); // API trả về Long nên parse
+        });
+      } else {
+        print("Failed to load pet count: ${response.statusCode}");
+      }
+    } catch (e) {
+      print("Error loading days count: $e");
     }
   }
 
@@ -640,10 +711,10 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
               Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  color: Color(0xFF3B82F6).withOpacity(0.1),
+                  color: const Color(0xFF3B82F6).withOpacity(0.1),
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: Icon(Icons.analytics_rounded, color: Color(0xFF3B82F6), size: 24),
+                child: const Icon(Icons.analytics_rounded, color: Color(0xFF3B82F6), size: 24),
               ),
               const SizedBox(width: 12),
               Text(
@@ -660,9 +731,9 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceEvenly,
             children: [
-              _buildStatIndicator('Pets', 5, 10, Icons.pets_rounded),
-              _buildStatIndicator('Record', 42, 100, Icons.assignment),
-              _buildStatIndicator('Days', 127, 365, Icons.calendar_today_rounded),
+              _buildStatIndicator('Pets', petCount, Icons.pets_rounded),
+              _buildStatIndicator('Record', recordCount, Icons.assignment),
+              _buildStatIndicator('Days', daysCount, Icons.calendar_today_rounded),
             ],
           ),
         ],
@@ -670,24 +741,17 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     );
   }
 
-  Widget _buildStatIndicator(String label, int value, int max, IconData icon) {
+  Widget _buildStatIndicator(String label, int value, IconData icon) {
     return Column(
       children: [
-        Stack(
-          alignment: Alignment.center,
-          children: [
-            SizedBox(
-              width: 60,
-              height: 60,
-              child: CircularProgressIndicator(
-                value: value / max,
-                backgroundColor: Color(0xFF3B82F6).withOpacity(0.1),
-                valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF3B82F6)),
-                strokeWidth: 6,
-              ),
-            ),
-            Icon(icon, color: Color(0xFF3B82F6), size: 24),
-          ],
+        Container(
+          width: 60,
+          height: 60,
+          decoration: BoxDecoration(
+            color: const Color(0xFF3B82F6).withOpacity(0.1),
+            shape: BoxShape.circle,
+          ),
+          child: Icon(icon, color: const Color(0xFF3B82F6), size: 28),
         ),
         const SizedBox(height: 8),
         Text(
@@ -708,6 +772,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
       ],
     );
   }
+
 
 
 }

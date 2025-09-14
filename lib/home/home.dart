@@ -27,7 +27,7 @@ class WeatherApiService {
     if (response.statusCode == 200) {
       return jsonDecode(response.body);
     } else {
-      throw Exception("Failed to load weather: ${response.statusCode}");
+      throw Exception("Failed to load weather!");
     }
   }
 }
@@ -46,6 +46,7 @@ class _HomePageState extends State<HomePage> {
   bool isLoading = true;
   String avatar = "avatar";
   int userId = 0;
+
   final List<Map<String, dynamic>> _emergencyServices = [
     {'name': '24/7 Emergency', 'phone': '1900-1234', 'available': true},
     {'name': 'Poison Control', 'phone': '1900-5678', 'available': true},
@@ -179,26 +180,19 @@ class _HomePageState extends State<HomePage> {
       print('Fetching appointments from: $url');
       final response = await http.get(url);
 
-      print('API Response Status: ${response.statusCode}');
-      print('API Response Body: ${response.body}');
-
       if (response.statusCode == 200) {
         final List<dynamic> data = jsonDecode(response.body);
         List<Appointment> loadedAppointments = data.map((e) => Appointment.fromJson(e)).toList();
-        print('Parsed Appointments: $loadedAppointments');
 
         // Fetch additional discovery and pet details
         final discoveryIds = loadedAppointments.map((a) => a.discoveryId).toSet().toList();
         final petIds = loadedAppointments.map((a) => a.petId).toSet().toList();
-        print('Discovery IDs: $discoveryIds');
-        print('Pet IDs: $petIds');
 
         if (discoveryIds.isNotEmpty) {
           final discoveryRes = await http.get(
             Uri.parse("http://10.0.2.2:8080/api/discoveries/ids?ids=${discoveryIds.join("&ids=")}"),
           );
-          print('Discovery API Status: ${discoveryRes.statusCode}');
-          print('Discovery API Response: ${discoveryRes.body}');
+
           if (discoveryRes.statusCode == 200) {
             final discoveryList = jsonDecode(discoveryRes.body);
             final discoveryMap = {
@@ -207,11 +201,10 @@ class _HomePageState extends State<HomePage> {
                 'location': d['location'],
               }
             };
-            print('Discovery Map: $discoveryMap');
 
             for (var appt in loadedAppointments) {
-              appt.discoveryName = discoveryMap[appt.discoveryId]?['name'] ?? "Unknown Service";
-              appt.location = discoveryMap[appt.discoveryId]?['location'] ?? "Unknown Location";
+              appt.discoveryName = discoveryMap[appt.discoveryId]?['name'] ?? "";
+              appt.location = discoveryMap[appt.discoveryId]?['location'] ?? "";
             }
           } else {
             print('Failed to fetch discoveries: ${discoveryRes.statusCode}');
@@ -222,8 +215,7 @@ class _HomePageState extends State<HomePage> {
           final petRes = await http.get(
             Uri.parse("http://10.0.2.2:8080/api/pets/ids?ids=${petIds.join("&ids=")}"),
           );
-          print('Pet API Status: ${petRes.statusCode}');
-          print('Pet API Response: ${petRes.body}');
+
           if (petRes.statusCode == 200) {
             final petList = jsonDecode(petRes.body);
             final petMap = {
@@ -236,18 +228,17 @@ class _HomePageState extends State<HomePage> {
                   'avatar': p['avatar'],
                 }
             };
-            print('Pet Map: $petMap');
 
             for (var appt in loadedAppointments) {
               final petData = petMap[appt.petId];
               if (petData != null) {
-                appt.petName = petData['name'] ?? "Unknown Pet";
+                appt.petName = petData['name'] ?? "";
                 appt.petSpecies = petData['species'] ?? "";
                 appt.petBreed = petData['breed'] ?? "";
                 appt.petAge = petData['age'] ?? 0;
                 appt.petAvatar = petData['avatar'] ?? "";
               } else {
-                appt.petName = "Unknown Pet";
+                appt.petName = "";
               }
             }
           } else {
@@ -262,20 +253,15 @@ class _HomePageState extends State<HomePage> {
           return aTime.compareTo(bTime);
         });
 
-        print('Sorted Appointments: $loadedAppointments');
         setState(() {
           appointments = loadedAppointments.take(2).toList();
-          print('Updated appointments state: $appointments');
         });
       } else {
-        print('API failed with status: ${response.statusCode}');
         setState(() {
           appointments = [];
         });
       }
     } catch (e, stackTrace) {
-      print('Error fetching appointments: $e');
-      print('Stack trace: $stackTrace');
       setState(() {
         appointments = [];
       });
@@ -295,8 +281,7 @@ class _HomePageState extends State<HomePage> {
         'apptTime': appointment.apptTime?.toIso8601String(),
         'status': 'CANCELLED',
       };
-      print('Cancelling appointment with ID: ${appointment.id}');
-      print('Request Body: ${jsonEncode(body)}');
+
       final response = await http.put(
         url,
         headers: {
@@ -421,26 +406,26 @@ class _HomePageState extends State<HomePage> {
           icon: Icon(Icons.emergency, color: Colors.red[600]),
           onPressed: _showEmergencyDialog,
         ),
-        Stack(
-          children: [
-            IconButton(
-              icon: const Icon(Icons.notifications_outlined, color: Color(0xFF2A2D3E)),
-              onPressed: () {},
-            ),
-            Positioned(
-              right: 8,
-              top: 8,
-              child: Container(
-                width: 8,
-                height: 8,
-                decoration: BoxDecoration(
-                  color: Colors.red,
-                  borderRadius: BorderRadius.circular(4),
-                ),
-              ),
-            ),
-          ],
-        ),
+        // Stack(
+        //   children: [
+        //     IconButton(
+        //       icon: const Icon(Icons.notifications_outlined, color: Color(0xFF2A2D3E)),
+        //       onPressed: () {},
+        //     ),
+        //     Positioned(
+        //       right: 8,
+        //       top: 8,
+        //       child: Container(
+        //         width: 8,
+        //         height: 8,
+        //         decoration: BoxDecoration(
+        //           color: Colors.red,
+        //           borderRadius: BorderRadius.circular(4),
+        //         ),
+        //       ),
+        //     ),
+        //   ],
+        // ),
         const SizedBox(width: 8),
       ],
     );
@@ -459,7 +444,7 @@ class _HomePageState extends State<HomePage> {
           const SizedBox(height: 32),
           _buildUpcomingAppointmentsSection(),
           const SizedBox(height: 32),
-          _buildTipsSection(),
+          _buildTipsSection(context),
           const SizedBox(height: 100),
         ],
       ),
@@ -820,7 +805,7 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Widget _buildTipsSection() {
+  Widget _buildTipsSection(BuildContext context) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -834,6 +819,7 @@ class _HomePageState extends State<HomePage> {
         ),
         const SizedBox(height: 16),
         _buildTipCard(
+          context,
           'Winter Fur Care for Dogs & Cats',
           'Winter dry weather can make pet fur dry and brittle. Learn essential care tips...',
           'assets/images/tip1.jpg',
@@ -1118,7 +1104,7 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Widget _buildTipCard(String title, String description, String imagePath) {
+  Widget _buildTipCard(BuildContext context, String title, String description, String imagePath) {
     return Container(
       decoration: BoxDecoration(
         color: Colors.white,
@@ -1143,25 +1129,14 @@ class _HomePageState extends State<HomePage> {
         children: [
           ClipRRect(
             borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
-            child: Container(
+            child: Image.asset(
+              imagePath,
               height: 160,
               width: double.infinity,
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [Color(0xFF3B82F6).withOpacity(0.8), Color(0xFF60A5FA).withOpacity(0.8)],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
-              ),
-              child: Center(
-                child: Icon(
-                  Icons.pets,
-                  size: 60,
-                  color: Colors.white,
-                ),
-              ),
+              fit: BoxFit.cover,
             ),
           ),
+
           Padding(
             padding: const EdgeInsets.all(16),
             child: Column(
@@ -1209,12 +1184,37 @@ class _HomePageState extends State<HomePage> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text(
-                      'Read More →',
-                      style: GoogleFonts.poppins(
-                        fontSize: 14,
-                        color: const Color(0xFF3B82F6),
-                        fontWeight: FontWeight.w500,
+                    InkWell(
+                      // onTap: () async {
+                      //   final url = Uri.parse('http://localhost:4200/blog');
+                      //   try {
+                      //     if (await canLaunchUrl(url)) {
+                      //       await launchUrl(
+                      //         url,
+                      //         mode: LaunchMode.externalApplication, // Mở trong trình duyệt mặc định
+                      //       );
+                      //     } else {
+                      //       ScaffoldMessenger.of(context).showSnackBar(
+                      //         SnackBar(content: Text('Không thể mở $url')),
+                      //       );
+                      //     }
+                      //   } catch (e) {
+                      //     ScaffoldMessenger.of(context).showSnackBar(
+                      //       SnackBar(content: Text('Lỗi khi mở URL: $e')),
+                      //     );
+                      //   }
+                      // },
+                      borderRadius: BorderRadius.circular(4),
+                      child: Padding(
+                        padding: const EdgeInsets.all(4.0),
+                        child: Text(
+                          'Read More →',
+                          style: GoogleFonts.poppins(
+                            fontSize: 14,
+                            color: const Color(0xFF3B82F6),
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
                       ),
                     ),
                     Row(
