@@ -118,7 +118,7 @@ class _AddPetPageState extends State<AddPetPage> with SingleTickerProviderStateM
       });
 
       // Upload ngay khi chọn ảnh
-      if (_imgbbApiKey == 'fa4176aa6360d22d4809f8799fbdf498') {
+      if (_imgbbApiKey != 'fa4176aa6360d22d4809f8799fbdf498') {
         _showSnackBar("Please set your ImgBB API key", isError: true);
         setState(() => _isUploadingImage = false);
         return;
@@ -161,6 +161,7 @@ class _AddPetPageState extends State<AddPetPage> with SingleTickerProviderStateM
 
     // Chuẩn hóa body để gửi API
     final body = {
+      if (widget.pet != null && widget.pet!.id != null) "id": widget.pet!.id,
       "ownerId": ownerId,
       "name": _nameController.text.trim(),
       "species": _speciesController.text.trim(),

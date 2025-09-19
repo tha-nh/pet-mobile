@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
@@ -675,8 +676,9 @@ class _BookingPageState extends State<BookingPage> with TickerProviderStateMixin
                     ),
                   ),
                   child: CircleAvatar(
-                    backgroundImage: NetworkImage(pet.avatar),
                     radius: 26,
+                    backgroundImage: CachedNetworkImageProvider(pet.avatar),
+                    backgroundColor: Colors.grey[200],
                   ),
                 ),
                 SizedBox(width: 16),

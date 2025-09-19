@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
@@ -26,7 +27,7 @@ class _PetPageState extends State<PetPage> with TickerProviderStateMixin {
   void initState() {
     super.initState();
     _controller = AnimationController(
-      duration: const Duration(milliseconds: 1000),
+      duration: const Duration(milliseconds: 200),
       vsync: this,
     );
     _animation = Tween<double>(begin: 0.0, end: 1.0).animate(
@@ -272,11 +273,13 @@ class _PetPageState extends State<PetPage> with TickerProviderStateMixin {
                 children: [
                   ClipRRect(
                     borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
-                    child: Image.network(
-                      pet.avatar,
+                    child: CachedNetworkImage(
+                      imageUrl: pet.avatar,
                       width: double.infinity,
                       height: double.infinity,
                       fit: BoxFit.cover,
+                      placeholder: (context, url) => Center(child: CircularProgressIndicator()),
+                      errorWidget: (context, url, error) => Icon(Icons.error),
                     ),
                   ),
                   Positioned(

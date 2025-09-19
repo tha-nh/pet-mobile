@@ -1,3 +1,4 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
@@ -425,8 +426,9 @@ class _AppointmentDetailPageState extends State<AppointmentDetailPage> {
               CircleAvatar(
                 radius: 28,
                 backgroundImage: petAvatar != null && petAvatar.isNotEmpty
-                    ? NetworkImage(petAvatar)
-                    : const NetworkImage("https://cdn-icons-png.flaticon.com/512/616/616408.png"),
+                    ? CachedNetworkImageProvider(petAvatar)
+                    : const CachedNetworkImageProvider(
+                    "https://cdn-icons-png.flaticon.com/512/616/616408.png"),
                 backgroundColor: Colors.grey[200],
               ),
               const SizedBox(width: 16),

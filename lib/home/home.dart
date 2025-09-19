@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
@@ -77,41 +78,6 @@ class _HomePageState extends State<HomePage> {
     final prefs = await SharedPreferences.getInstance();
     userId = prefs.getInt('userId') ?? 0;
 
-    if (userId == 0) {
-      // Nếu chưa login → hiển thị demo pets
-      setState(() {
-        pets = [
-          {
-            'id': null,
-            'name': 'Milu',
-            'breed': 'Golden Retriever',
-            'species': 'Dog',
-            'age': 3,
-            'avatar': 'assets/images/dog1.jpg',
-            'isDemo': true
-          },
-          {
-            'id': null,
-            'name': 'Kitty',
-            'breed': 'Persian Cat',
-            'species': 'Cat',
-            'age': 2,
-            'avatar': 'assets/images/cat1.jpg',
-            'isDemo': true
-          },
-          {
-            'id': null,
-            'name': 'Buddy',
-            'breed': 'Husky',
-            'species': 'Dog',
-            'age': 4,
-            'avatar': 'assets/images/dog2.jpg',
-            'isDemo': true
-          },
-        ];
-        isLoading = false;
-      });
-    } else {
       try {
         final url = Uri.parse("http://10.0.2.2:8080/api/pets/user/$userId");
         final response = await http.get(url);
@@ -146,7 +112,7 @@ class _HomePageState extends State<HomePage> {
           isLoading = false;
         });
       }
-    }
+
   }
 
   Future<void> _makePhoneCall(String phoneNumber) async {
@@ -177,7 +143,6 @@ class _HomePageState extends State<HomePage> {
 
     try {
       final url = Uri.parse("http://10.0.2.2:8080/api/appointments/next/$userId");
-      print('Fetching appointments from: $url');
       final response = await http.get(url);
 
       if (response.statusCode == 200) {
@@ -372,11 +337,23 @@ class _HomePageState extends State<HomePage> {
       leading: Padding(
         padding: const EdgeInsets.all(8.0),
         child: CircleAvatar(
-          backgroundImage: avatar != 'avatar'
-              ? NetworkImage(avatar)
-              : const NetworkImage('https://i.pravatar.cc/150?img=3'),
-          backgroundColor: Colors.grey[200],
           radius: 18,
+          backgroundColor: Colors.grey[200],
+          backgroundImage: null, // backgroundImage không dùng nữa vì dùng child
+          child: ClipOval(
+            child: CachedNetworkImage(
+              imageUrl: avatar != 'avatar'
+                  ? avatar
+                  : 'https://i.pravatar.cc/150?img=3',
+              width: 36,
+              height: 36,
+              fit: BoxFit.cover,
+              placeholder: (context, url) => Container(
+                color: Colors.grey[300],
+              ),
+              errorWidget: (context, url, error) => Icon(Icons.error, size: 18),
+            ),
+          ),
         ),
 
       ),
@@ -643,8 +620,9 @@ class _HomePageState extends State<HomePage> {
                 backgroundImage: isDemo
                     ? AssetImage(avatar) as ImageProvider
                     : (avatar.isNotEmpty
-                    ? NetworkImage(avatar)
-                    : NetworkImage("https://cdn-icons-png.flaticon.com/512/616/616408.png")),
+                    ? CachedNetworkImageProvider(avatar)
+                    : const CachedNetworkImageProvider(
+                    "https://cdn-icons-png.flaticon.com/512/616/616408.png")),
                 backgroundColor: Colors.grey[200],
               ),
               const SizedBox(height: 6),

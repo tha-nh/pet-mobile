@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
@@ -245,10 +246,13 @@ class _PetRecordPageState extends State<PetRecordPage> with TickerProviderStateM
                         ],
                       ),
                       child: ClipOval(
-                        child: Image.network(
-                          widget.pet.avatar,
+                        child: CachedNetworkImage(
+                          imageUrl: widget.pet.avatar,
                           fit: BoxFit.cover,
-                          errorBuilder: (_, __, ___) => Container(
+                          placeholder: (context, url) => Container(
+                            color: Colors.grey[200],
+                          ),
+                          errorWidget: (context, url, error) => Container(
                             color: Colors.white,
                             child: Icon(
                               Icons.pets,
